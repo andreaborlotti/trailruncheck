@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dolomyths Run Sky - Elevation Compare</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #comparison-container {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        .profile-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            pointer-events: none;
+        }
+        .distance-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .elevation-axis {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .crosshair-line {
+            position: absolute;
+            pointer-events: none;
+            z-index: 15;
+        }
+        .crosshair-h {
+            height: 1px;
+            background: #ef4444;
+            width: 100%;
+            left: 0;
+        }
+        .crosshair-v {
+            width: 1px;
+            background: #ef4444;
+            height: 100%;
+            top: 0;
+        }
+        .elevation-indicator {
+            position: absolute;
+            left: 5px;
+            background: #ef4444;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            pointer-events: none;
+            z-index: 20;
+            white-space: nowrap;
+        }
+        .grid-line-major {
+            stroke: #94a3b8;
+            stroke-width: 1.5;
+            opacity: 0.4;
+        }
+        .grid-line-minor {
+            stroke: #cbd5e1;
+            stroke-width: 1;
+            opacity: 0.3;
+        }
+        .grid-label {
+            font-size: 11px;
+            fill: #475569;
+            font-weight: 600;
+        }
+        .elevation-tick-major {
+            stroke: #475569;
+            stroke-width: 2;
+        }
+        .elevation-tick-minor {
+            stroke: #94a3b8;
+            stroke-width: 1;
+        }
+        .elevation-label {
+            font-size: 11px;
+            fill: #1e293b;
+            font-weight: 700;
+        }
+        .mode-button {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-button.active {
+            background: #3b82f6;
+            color: white;
+        }
+        .mode-button.inactive {
+            background: #e2e8f0;
+            color: #64748b;
+        }
+        .loading-message {
+            padding: 8px 16px;
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #92400e;
+        }
+        .error-message {
+            padding: 8px 16px;
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-3xl font-black text-red-700">DOLOMYTHS RUN SKY <span class="text-gray-800">| COMPARATORE DISLIVELLI</span></h1>
+            <p class="text-gray-600 italic">Trascina il profilo blu per allinearlo alla gara ufficiale.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <div class="bg-white p-4 rounded shadow">
+                <div class="text-xs font-bold uppercase text-red-600 mb-2">Gara Ufficiale (Riferimento)</div>
+                <div id="garaStatus" class="loading-message">Caricamento percorso gara...</div>
+                <div id="garaInfo" class="text-[10px] text-gray-500 mt-2"></div>
+            </div>
+            <div class="bg-white p-4 rounded shadow">
+                <label class="block text-xs font-bold uppercase text-blue-600 mb-2">Carica Tuo Percorso</label>
+                <input type="file" id="uploadConfronto" accept=".gpx" class="text-xs">
+                <div id="confrontoInfo" class="text-[10px] text-gray-500 mt-2"></div>
+            </div>
+            <div class="bg-white p-4 rounded shadow">
+                <div class="text-xs font-bold uppercase text-gray-400 mb-3">Modalità Trascinamento</div>
+                <div class="flex gap-2 mb-3">
+                    <button id="modeXY" class="mode-button active" onclick="setDragMode('xy')">XY</button>
+                    <button id="modeX" class="mode-button inactive" onclick="setDragMode('x')">Solo X</button>
+                    <button id="modeY" class="mode-button inactive" onclick="setDragMode('y')">Solo Y</button>
+                </div>
+                <div class="text-[10px] font-bold uppercase text-gray-400 space-y-1">
+                    <div>X: <span id="offsetX">0</span>px (<span id="offsetKm">0.0</span> km)</div>
+                    <div>Y: <span id="offsetY">0</span>px (<span id="offsetM">0</span> m)</div>
+                    <button onclick="resetOffset()" class="text-red-500 underline mt-2">Reset Posizione</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="comparison-container" class="rounded-xl shadow-inner shadow-lg">
+            <svg id="distance-grid" class="distance-grid"></svg>
+            <svg id="elevation-axis" class="elevation-axis"></svg>
+            
+            <div id="crosshair-h" class="crosshair-line crosshair-h" style="display: none;"></div>
+            <div id="crosshair-v" class="crosshair-line crosshair-v" style="display: none;"></div>
+            <div id="elevation-indicator" class="elevation-indicator" style="display: none;"></div>
+            
+            <svg id="gara-svg" class="profile-svg w-full text-red-500 opacity-40" style="z-index: 2;"></svg>
+            <svg id="confronto-svg" class="profile-svg w-full text-blue-600 opacity-70" style="z-index: 3;"></svg>
+        </div>
+
+        <div class="mt-4 flex gap-4 text-sm">
+            <div class="flex items-center gap-2"><span class="w-3 h-3 bg-red-400 rounded-full"></span> Dolomyths Run Sky (Gara Ufficiale)</div>
+            <div class="flex items-center gap-2"><span class="w-3 h-3 bg-blue-600 rounded-full"></span> Tuo Percorso (Trascina per allineare)</div>
+        </div>
+    </div>
+
+    <script>
+        let isDragging = false;
+        let startX, startY, currentOffsetX = 0, currentOffsetY = 0;
+        let dragMode = 'xy';
+        let garaElevationStart = null;
+        let pixelsPerKm = 0;
+        let pixelsPerMeter = 0;
+        let maxDistanceKm = 0;
+        
+        const MARGIN_KM = 3;
+        const MIN_ELEVATION = 1200;
+        const MAX_ELEVATION = 3600;
+        const AXIS_MARGIN_LEFT = 60;
+        const GARA_GPX_FILE = 'percorso-dolomyths-run-sky.gpx';
+        
+        const container = document.getElementById('comparison-container');
+        const layerConfronto = document.getElementById('confronto-svg');
+        const crosshairH = document.getElementById('crosshair-h');
+        const crosshairV = document.getElementById('crosshair-v');
+        const elevationIndicator = document.getElementById('elevation-indicator');
+
+        function setDragMode(mode) {
+            dragMode = mode;
+            document.querySelectorAll('.mode-button').forEach(btn => {
+                btn.classList.remove('active');
+                btn.classList.add('inactive');
+            });
+            const activeBtn = mode === 'xy' ? 'modeXY' : (mode === 'x' ? 'modeX' : 'modeY');
+            document.getElementById(activeBtn).classList.remove('inactive');
+            document.getElementById(activeBtn).classList.add('active');
+        }
+
+        container.onmousemove = (e) => {
+            const rect = container.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            crosshairH.style.top = y + 'px';
+            crosshairH.style.display = 'block';
+            crosshairV.style.left = x + 'px';
+            crosshairV.style.display = 'block';
+            
+            const height = container.offsetHeight;
+            const elevation = MAX_ELEVATION - ((y / height) * (MAX_ELEVATION - MIN_ELEVATION));
+            elevationIndicator.style.top = (y - 12) + 'px';
+            elevationIndicator.style.display = 'block';
+            elevationIndicator.innerText = Math.round(elevation) + 'm';
+            
+            if (isDragging) {
+                if (dragMode === 'xy' || dragMode === 'x') {
+                    currentOffsetX = e.pageX - startX;
+                }
+                if (dragMode === 'xy' || dragMode === 'y') {
+                    currentOffsetY = e.pageY - startY;
+                }
+                
+                layerConfronto.style.transform = `translate(${currentOffsetX}px, ${currentOffsetY}px)`;
+                
+                document.getElementById('offsetX').innerText = Math.round(currentOffsetX);
+                if (pixelsPerKm > 0) {
+                    const offsetKm = (currentOffsetX / pixelsPerKm);
+                    document.getElementById('offsetKm').innerText = offsetKm.toFixed(2);
+                }
+                
+                document.getElementById('offsetY').innerText = Math.round(currentOffsetY);
+                if (pixelsPerMeter > 0) {
+                    const offsetMeters = Math.round(-currentOffsetY / pixelsPerMeter);
+                    document.getElementById('offsetM').innerText = offsetMeters;
+                }
+            }
+        };
+
+        container.onmouseleave = () => {
+            crosshairH.style.display = 'none';
+            crosshairV.style.display = 'none';
+            elevationIndicator.style.display = 'none';
+        };
+
+        container.onmousedown = (e) => {
+            isDragging = true;
+            startX = e.pageX - currentOffsetX;
+            startY = e.pageY - currentOffsetY;
+            container.style.cursor = 'crosshair';
+        };
+
+        window.onmouseup = () => {
+            isDragging = false;
+            container.style.cursor = 'crosshair';
+        };
+
+        function drawElevationAxis() {
+            const svg = document.getElementById('elevation-axis');
+            const height = container.offsetHeight;
+            
+            let axisTicks = '';
+            
+            axisTicks += `<line x1="${AXIS_MARGIN_LEFT}" y1="0" x2="${AXIS_MARGIN_LEFT}" y2="${height}" stroke="#1e293b" stroke-width="2"/>`;
+            
+            for (let elevation = MIN_ELEVATION; elevation <= MAX_ELEVATION; elevation += 100) {
+                const y = height - ((elevation - MIN_ELEVATION) / (MAX_ELEVATION - MIN_ELEVATION)) * height;
+                const isMajor = (elevation % 500 === 0);
+                
+                if (isMajor) {
+                    axisTicks += `<line x1="${AXIS_MARGIN_LEFT - 10}" y1="${y}" x2="${AXIS_MARGIN_LEFT}" y2="${y}" class="elevation-tick-major"/>`;
+                    axisTicks += `<text x="${AXIS_MARGIN_LEFT - 15}" y="${y + 4}" class="elevation-label" text-anchor="end">${elevation}m</text>`;
+                } else {
+                    axisTicks += `<line x1="${AXIS_MARGIN_LEFT - 6}" y1="${y}" x2="${AXIS_MARGIN_LEFT}" y2="${y}" class="elevation-tick-minor"/>`;
+                }
+            }
+            
+            svg.setAttribute('width', AXIS_MARGIN_LEFT);
+            svg.setAttribute('height', height);
+            svg.innerHTML = axisTicks;
+        }
+
+        function drawDistanceGrid() {
+            const svg = document.getElementById('distance-grid');
+            const containerWidth = container.offsetWidth;
+            const height = container.offsetHeight;
+            
+            if (maxDistanceKm === 0 || pixelsPerKm === 0) return;
+            
+            let gridLines = '';
+            
+            const startKm = -MARGIN_KM;
+            const endKm = maxDistanceKm + MARGIN_KM;
+            
+            for (let km = Math.floor(startKm * 2) / 2; km <= endKm; km += 0.5) {
+                const x = (km + MARGIN_KM) * pixelsPerKm + AXIS_MARGIN_LEFT;
+                const isMajor = (km % 2 === 0) && km >= 0;
+                
+                if (isMajor) {
+                    gridLines += `<line x1="${x}" y1="0" x2="${x}" y2="${height}" class="grid-line-major"/>`;
+                    gridLines += `<text x="${x}" y="${height - 5}" class="grid-label" text-anchor="middle">${km}km</text>`;
+                } else if (km >= 0) {
+                    gridLines += `<line x1="${x}" y1="0" x2="${x}" y2="${height}" class="grid-line-minor"/>`;
+                }
+            }
+            
+            svg.setAttribute('width', containerWidth);
+            svg.setAttribute('height', height);
+            svg.innerHTML = gridLines;
+        }
+
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        async function parseGPX(fileOrPath) {
+            let text;
+            if (typeof fileOrPath === 'string') {
+                // Caricamento da URL/path
+                const response = await fetch(fileOrPath);
+                if (!response.ok) {
+                    throw new Error(`Impossibile caricare il file: ${response.statusText}`);
+                }
+                text = await response.text();
+            } else {
+                // Caricamento da file upload
+                text = await fileOrPath.text();
+            }
+            
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(text, "text/xml");
+            const trkpts = Array.from(xml.querySelectorAll('trkpt'));
+            
+            if (trkpts.length === 0) {
+                throw new Error('Nessun punto trovato nel file GPX');
+            }
+            
+            const points = trkpts.map(pt => ({
+                lat: parseFloat(pt.getAttribute('lat')),
+                lon: parseFloat(pt.getAttribute('lon')),
+                ele: parseFloat(pt.querySelector('ele')?.textContent || 0)
+            }));
+
+            let cumulativeDistance = 0;
+            const data = points.map((pt, i) => {
+                if (i > 0) {
+                    cumulativeDistance += haversineDistance(
+                        points[i-1].lat, points[i-1].lon,
+                        pt.lat, pt.lon
+                    );
+                }
+                return {
+                    distance: cumulativeDistance,
+                    elevation: pt.ele
+                };
+            });
+
+            return data;
+        }
+
+        function drawProfile(data, svgId, baselineElevation, isReference = false) {
+            const svg = document.getElementById(svgId);
+            const containerWidth = container.offsetWidth;
+            const height = container.offsetHeight;
+            
+            const elevationOffset = data[0].elevation - baselineElevation;
+            const totalDistance = data[data.length - 1].distance;
+            
+            if (isReference) {
+                maxDistanceKm = Math.ceil(totalDistance);
+                pixelsPerMeter = height / (MAX_ELEVATION - MIN_ELEVATION);
+                drawElevationAxis();
+            }
+            
+            const totalWidthKm = maxDistanceKm + (2 * MARGIN_KM);
+            const widthScale = (containerWidth - AXIS_MARGIN_LEFT) / totalWidthKm;
+            
+            if (isReference) {
+                pixelsPerKm = widthScale;
+                drawDistanceGrid();
+            }
+
+            const points = data.map(pt => {
+                const x = (pt.distance + MARGIN_KM) * widthScale + AXIS_MARGIN_LEFT;
+                const adjustedEle = pt.elevation - elevationOffset;
+                const y = height - ((adjustedEle - MIN_ELEVATION) / (MAX_ELEVATION - MIN_ELEVATION)) * height;
+                return `${x},${y}`;
+            }).join(' ');
+
+            const maxX = (totalDistance + MARGIN_KM) * widthScale + AXIS_MARGIN_LEFT;
+            const minX = MARGIN_KM * widthScale + AXIS_MARGIN_LEFT;
+
+            svg.setAttribute('width', containerWidth);
+            svg.innerHTML = `
+                <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke" />
+                <path d="M${minX},${height} ${points} ${maxX},${height} Z" fill="currentColor" opacity="0.1" />
+            `;
+
+            return {
+                distance: totalDistance.toFixed(2),
+                elevationStart: data[0].elevation.toFixed(0),
+                elevationGain: (data[data.length - 1].elevation - data[0].elevation).toFixed(0)
+            };
+        }
+
+        // Carica automaticamente il percorso della gara all'avvio
+        async function loadGaraGPX() {
+            try {
+                const data = await parseGPX(GARA_GPX_FILE);
+                garaElevationStart = data[0].elevation;
+                const info = drawProfile(data, 'gara-svg', garaElevationStart, true);
+                
+                document.getElementById('garaStatus').className = 'loading-message';
+                document.getElementById('garaStatus').style.background = '#d1fae5';
+                document.getElementById('garaStatus').style.borderColor = '#10b981';
+                document.getElementById('garaStatus').style.color = '#065f46';
+                document.getElementById('garaStatus').innerText = '✓ Percorso gara caricato';
+                
+                document.getElementById('garaInfo').innerHTML = 
+                    `${info.distance} km<br>Start: ${info.elevationStart}m<br>D+: ${info.elevationGain}m`;
+            } catch (error) {
+                document.getElementById('garaStatus').className = 'error-message';
+                document.getElementById('garaStatus').innerText = `Errore: ${error.message}`;
+                console.error('Errore caricamento GPX gara:', error);
+            }
+        }
+
+        // Gestione upload file confronto
+        document.getElementById('uploadConfronto').onchange = async (e) => {
+            try {
+                const data = await parseGPX(e.target.files[0]);
+                if (garaElevationStart === null) {
+                    alert('Attendere il caricamento del percorso della gara!');
+                    return;
+                }
+                const info = drawProfile(data, 'confronto-svg', garaElevationStart, false);
+                document.getElementById('confrontoInfo').innerHTML = 
+                    `${info.distance} km<br>Start: ${info.elevationStart}m<br>D+: ${info.elevationGain}m`;
+            } catch (error) {
+                alert(`Errore nel caricamento del file: ${error.message}`);
+                console.error('Errore caricamento GPX confronto:', error);
+            }
+        };
+
+        function resetOffset() {
+            currentOffsetX = 0;
+            currentOffsetY = 0;
+            layerConfronto.style.transform = `translate(0px, 0px)`;
+            document.getElementById('offsetX').innerText = "0";
+            document.getElementById('offsetY').innerText = "0";
+            document.getElementById('offsetKm').innerText = "0.0";
+            document.getElementById('offsetM').innerText = "0";
+        }
+
+        // Avvia il caricamento automatico al caricamento della pagina
+        window.addEventListener('DOMContentLoaded', loadGaraGPX);
+    </script>
+</body>
+</html>
